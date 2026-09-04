@@ -48,12 +48,21 @@ class EvaluationConfig:
 
 
 @dataclass(frozen=True)
+class IlluminationAugmentationConfig:
+    enabled: bool = False
+    brightness: Tuple[float, float] = (1.0, 1.0)
+    contrast: Tuple[float, float] = (1.0, 1.0)
+    gamma: Tuple[float, float] = (1.0, 1.0)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     experiment: ExperimentConfig
     device: DeviceConfig
     dataset: DatasetConfig
     patchcore: PatchCoreConfig
     evaluation: EvaluationConfig
+    augmentation: IlluminationAugmentationConfig
 
 
 class ConfigLoader:
@@ -77,11 +86,18 @@ class ConfigLoader:
             patchcore_raw["feature_layers"] = tuple(patchcore_raw["feature_layers"])
             patchcore = PatchCoreConfig(**patchcore_raw)
             evaluation = EvaluationConfig(**raw["evaluation"])
+            augmentation_raw = dict(raw.get("augmentation", {}))
+            for key in ("brightness", "contrast", "gamma"):
+                if key in augmentation_raw:
+                    augmentation_raw[key] = tuple(augmentation_raw[key])
+            augmentation = IlluminationAugmentationConfig(**augmentation_raw)
         except (KeyError, TypeError) as error:
             raise ValueError("Invalid PatchCore configuration: {}".format(error))
 
-        self._validate(experiment, device, dataset, patchcore)
-        return AppConfig(experiment, device, dataset, patchcore, evaluation)
+        self._validate(experiment, device, dataset, patchcore, augmentation)
+        return AppConfig(
+            experiment, device, dataset, patchcore, evaluation, augmentation
+        )
 
     @staticmethod
     def _validate(
@@ -89,6 +105,7 @@ class ConfigLoader:
         device: DeviceConfig,
         dataset: DatasetConfig,
         patchcore: PatchCoreConfig,
+        augmentation: IlluminationAugmentationConfig,
     ) -> None:
         if experiment.seed < 0:
             raise ValueError("Experiment seed must be non-negative.")
@@ -102,3 +119,13 @@ class ConfigLoader:
             raise ValueError("At least one feature layer is required.")
         if patchcore.nearest_neighbors <= 0 or patchcore.patch_size <= 0:
             raise ValueError("Nearest neighbors and patch size must be positive.")
+        for name in ("brightness", "contrast", "gamma"):
+            value_range = getattr(augmentation, name)
+            if len(value_range) != 2 or value_range[0] <= 0:
+                raise ValueError(
+                    "Augmentation {} must contain two positive bounds.".format(name)
+                )
+            if value_range[0] > value_range[1]:
+                raise ValueError(
+                    "Augmentation {} lower bound exceeds upper bound.".format(name)
+                )

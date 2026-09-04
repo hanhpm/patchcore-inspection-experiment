@@ -1,27 +1,25 @@
 experiment:
-  name: patchcore_cpu_smoke
+  name: patchcore_illumination_aug
   seed: 42
 
 device:
-  requested: cpu
+  requested: auto
 
 dataset:
   name: mvtec
   root: ../datasets/mvtec
   class_name: bottle
-  resize: 128
-  image_size: 128
-  max_train_samples: 10
-  max_test_samples: 10
+  resize: 256
+  image_size: 224
 
 patchcore:
   backbone: wideresnet50
   feature_layers:
     - layer2
     - layer3
-  coreset_ratio: 0.01
+  coreset_ratio: 0.1
   pretrain_embedding_dimension: 1024
-  target_embedding_dimension: 256
+  target_embedding_dimension: 1024
   nearest_neighbors: 1
   patch_size: 3
 
@@ -31,7 +29,7 @@ evaluation:
   au_pro: true
 
 augmentation:
-  enabled: false
-  brightness: [1.0, 1.0]
-  contrast: [1.0, 1.0]
-  gamma: [1.0, 1.0]
+  enabled: true
+  brightness: [0.8, 1.2]
+  contrast: [0.8, 1.2]
+  gamma: [0.8, 1.2]

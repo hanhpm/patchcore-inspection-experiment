@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 import patchcore.backbones
+from patchcore.augmentation import RandomIlluminationTransform
 import patchcore.common
 import patchcore.metrics
 import patchcore.patchcore
@@ -71,8 +72,27 @@ class ExperimentRunner:
         shutil.copy2(str(config_path), str(run_directory / "config.yaml"))
         self._write_json(run_directory / "environment.json", self._environment(device))
         self._write_json(run_directory / "git.json", self._git_metadata())
+        self._write_git_diff(run_directory / "git.diff.patch")
 
+        event_log = [
+            "timestamp_utc={} event=run_started".format(
+                datetime.now(timezone.utc).isoformat()
+            ),
+            "config_path={}".format(config_path),
+            "device={}".format(device),
+            "augmentation_enabled={}".format(config.augmentation.enabled),
+            "augmentation_brightness={}".format(config.augmentation.brightness),
+            "augmentation_contrast={}".format(config.augmentation.contrast),
+            "augmentation_gamma={}".format(config.augmentation.gamma),
+        ]
         train_dataset, test_dataset = self._datasets(config)
+        event_log.extend(
+            [
+                "train_images={}".format(len(train_dataset)),
+                "test_images={}".format(len(test_dataset)),
+                "event=model_initialization_started",
+            ]
+        )
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=2, shuffle=False, num_workers=0
         )
@@ -81,8 +101,22 @@ class ExperimentRunner:
         )
         model = PatchCoreFactory().create(config, device)
         started = time.perf_counter()
+        event_log.append("event=memory_bank_fit_started")
         model.fit(train_loader)
+        fit_seconds = time.perf_counter() - started
+        event_log.append(
+            "event=memory_bank_fit_completed seconds={}".format(fit_seconds)
+        )
+        self._save_augmentation_samples(
+            run_directory / "augmentation_samples.json", train_dataset
+        )
+        inference_started = time.perf_counter()
+        event_log.append("event=inference_started")
         scores, anomaly_maps, labels, masks = model.predict(test_loader)
+        inference_seconds = time.perf_counter() - inference_started
+        event_log.append(
+            "event=inference_completed seconds={}".format(inference_seconds)
+        )
         runtime_seconds = time.perf_counter() - started
 
         image_auroc = patchcore.metrics.compute_imagewise_retrieval_metrics(
@@ -112,18 +146,45 @@ class ExperimentRunner:
                 aupro_result["number_of_regions"] if aupro_result else None
             ),
             "runtime_seconds": runtime_seconds,
+            "fit_seconds": fit_seconds,
+            "inference_seconds": inference_seconds,
             "seed": config.experiment.seed,
             "device": str(device),
             "train_images": len(train_dataset),
             "test_images": len(test_dataset),
+            "augmentation": {
+                "enabled": config.augmentation.enabled,
+                "applied_to": "train_normal_only",
+                "brightness": list(config.augmentation.brightness),
+                "contrast": list(config.augmentation.contrast),
+                "gamma": list(config.augmentation.gamma),
+            },
         }
         if not np.isfinite([metrics["i_auroc"], metrics["p_auroc"]]).all():
             raise AssertionError("Scientific baseline produced NaN or Inf metrics.")
         self._write_json(run_directory / "metrics.json", metrics)
+        np.savez_compressed(
+            str(run_directory / "predictions.npz"),
+            scores=np.asarray(scores),
+            anomaly_maps=np.asarray(anomaly_maps),
+            labels=np.asarray(labels),
+            masks=np.asarray(masks),
+        )
         self._save_anomaly_maps(run_directory / "anomaly_maps", anomaly_maps)
+        event_log.extend(
+            [
+                "event=metrics_computed",
+                "i_auroc={}".format(metrics["i_auroc"]),
+                "p_auroc={}".format(metrics["p_auroc"]),
+                "au_pro={}".format(metrics["au_pro"]),
+                "event=artifacts_saved",
+                "timestamp_utc={} event=run_completed status=PASS".format(
+                    datetime.now(timezone.utc).isoformat()
+                ),
+            ]
+        )
         (run_directory / "run.log").write_text(
-            "\n".join("{}: {}".format(key, value) for key, value in metrics.items())
-            + "\n",
+            "\n".join(event_log) + "\n",
             encoding="utf-8",
         )
         return run_directory
@@ -136,8 +197,17 @@ class ExperimentRunner:
             "resize": config.dataset.resize,
             "imagesize": config.dataset.image_size,
         }
+        train_transform = (
+            RandomIlluminationTransform(config.augmentation)
+            if config.augmentation.enabled
+            else None
+        )
         return (
-            MVTecDataset(split=DatasetSplit.TRAIN, **common),
+            MVTecDataset(
+                split=DatasetSplit.TRAIN,
+                image_transform=train_transform,
+                **common,
+            ),
             MVTecDataset(split=DatasetSplit.TEST, **common),
         )
 
@@ -179,6 +249,28 @@ class ExperimentRunner:
             "dirty": bool(status),
             "status": status.splitlines(),
         }
+
+    def _write_git_diff(self, path: Path) -> None:
+        diff = subprocess.check_output(
+            ["git", "diff", "--binary", "HEAD"], cwd=str(self.repository_root)
+        )
+        path.write_bytes(diff)
+
+    @staticmethod
+    def _save_augmentation_samples(path: Path, dataset: MVTecDataset) -> None:
+        transform = dataset.image_transform
+        if not isinstance(transform, RandomIlluminationTransform):
+            return
+        if len(transform.samples) != len(dataset):
+            raise AssertionError(
+                "Expected one logged augmentation sample per training image."
+            )
+        records = []
+        for item, factors in zip(dataset.data_to_iterate, transform.samples):
+            records.append({"image_path": item[2], **factors})
+        path.write_text(
+            json.dumps(records, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
     @staticmethod
     def _environment(device: torch.device) -> Dict[str, Any]:

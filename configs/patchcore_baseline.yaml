@@ -27,3 +27,9 @@ evaluation:
   image_auroc: true
   pixel_auroc: true
   au_pro: true
+
+augmentation:
+  enabled: false
+  brightness: [1.0, 1.0]
+  contrast: [1.0, 1.0]
+  gamma: [1.0, 1.0]
