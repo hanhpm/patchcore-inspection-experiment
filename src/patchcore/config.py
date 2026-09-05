@@ -56,6 +56,13 @@ class IlluminationAugmentationConfig:
 
 
 @dataclass(frozen=True)
+class TestShiftConfig:
+    enabled: bool = False
+    kind: str = "none"
+    factor: float = 1.0
+
+
+@dataclass(frozen=True)
 class AppConfig:
     experiment: ExperimentConfig
     device: DeviceConfig
@@ -63,6 +70,7 @@ class AppConfig:
     patchcore: PatchCoreConfig
     evaluation: EvaluationConfig
     augmentation: IlluminationAugmentationConfig
+    test_shift: TestShiftConfig
 
 
 class ConfigLoader:
@@ -91,12 +99,19 @@ class ConfigLoader:
                 if key in augmentation_raw:
                     augmentation_raw[key] = tuple(augmentation_raw[key])
             augmentation = IlluminationAugmentationConfig(**augmentation_raw)
+            test_shift = TestShiftConfig(**raw.get("test_shift", {}))
         except (KeyError, TypeError) as error:
             raise ValueError("Invalid PatchCore configuration: {}".format(error))
 
-        self._validate(experiment, device, dataset, patchcore, augmentation)
+        self._validate(experiment, device, dataset, patchcore, augmentation, test_shift)
         return AppConfig(
-            experiment, device, dataset, patchcore, evaluation, augmentation
+            experiment,
+            device,
+            dataset,
+            patchcore,
+            evaluation,
+            augmentation,
+            test_shift,
         )
 
     @staticmethod
@@ -106,6 +121,7 @@ class ConfigLoader:
         dataset: DatasetConfig,
         patchcore: PatchCoreConfig,
         augmentation: IlluminationAugmentationConfig,
+        test_shift: TestShiftConfig,
     ) -> None:
         if experiment.seed < 0:
             raise ValueError("Experiment seed must be non-negative.")
@@ -129,3 +145,9 @@ class ConfigLoader:
                 raise ValueError(
                     "Augmentation {} lower bound exceeds upper bound.".format(name)
                 )
+        if test_shift.kind not in {"none", "brightness", "contrast", "gamma"}:
+            raise ValueError("Unsupported test shift kind: {}.".format(test_shift.kind))
+        if test_shift.factor <= 0:
+            raise ValueError("Test shift factor must be positive.")
+        if test_shift.enabled and test_shift.kind == "none":
+            raise ValueError("Enabled test shift requires a non-none kind.")

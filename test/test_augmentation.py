@@ -3,6 +3,7 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
+from patchcore.augmentation import FixedIlluminationTransform
 from patchcore.augmentation import RandomIlluminationTransform
 from patchcore.config import IlluminationAugmentationConfig
 
@@ -37,3 +38,16 @@ def test_illumination_transform_applies_all_three_sampled_factors():
     ]
     assert transformed.size == image.size
     assert transform.samples == [{"brightness": 0.8, "contrast": 1.2, "gamma": 0.9}]
+
+
+def test_fixed_brightness_shift_is_deterministic_and_keeps_geometry():
+    pixels = np.full((8, 8, 3), 100, dtype=np.uint8)
+    image = Image.fromarray(pixels)
+    transform = FixedIlluminationTransform("brightness", 0.8)
+
+    first = transform(image)
+    second = transform(image)
+
+    np.testing.assert_array_equal(np.asarray(first), np.asarray(second))
+    assert first.size == image.size
+    assert np.asarray(first).mean() == 80

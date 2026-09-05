@@ -32,3 +32,24 @@ class RandomIlluminationTransform:
     @staticmethod
     def _sample(value_range: Tuple[float, float]) -> float:
         return random.uniform(value_range[0], value_range[1])
+
+
+class FixedIlluminationTransform:
+    """Apply one controlled, deterministic illumination change."""
+
+    _TRANSFORMS = {
+        "brightness": functional.adjust_brightness,
+        "contrast": functional.adjust_contrast,
+        "gamma": functional.adjust_gamma,
+    }
+
+    def __init__(self, kind: str, factor: float) -> None:
+        if kind not in self._TRANSFORMS:
+            raise ValueError("Unsupported illumination shift: {}.".format(kind))
+        if factor <= 0:
+            raise ValueError("Illumination shift factor must be positive.")
+        self.kind = kind
+        self.factor = factor
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        return self._TRANSFORMS[self.kind](image, self.factor)

@@ -19,6 +19,8 @@ def test_baseline_config_loads_with_expected_frozen_values():
     assert config.evaluation.au_pro is True
     assert config.augmentation.enabled is False
     assert config.augmentation.brightness == (1.0, 1.0)
+    assert config.test_shift.enabled is False
+    assert config.test_shift.kind == "none"
 
 
 def test_illumination_config_changes_only_augmentation_settings():
@@ -36,3 +38,22 @@ def test_illumination_config_changes_only_augmentation_settings():
     assert augmented.augmentation.brightness == (0.8, 1.2)
     assert augmented.augmentation.contrast == (0.8, 1.2)
     assert augmented.augmentation.gamma == (0.8, 1.2)
+
+
+def test_controlled_brightness_configs_change_only_train_method_and_test_shift():
+    repository_root = Path(__file__).resolve().parents[1]
+    vanilla = ConfigLoader().load(
+        repository_root / "configs/experiments/vanilla_brightness_08.yaml"
+    )
+    augmented = ConfigLoader().load(
+        repository_root / "configs/experiments/augmented_brightness_08.yaml"
+    )
+
+    assert vanilla.dataset == augmented.dataset
+    assert vanilla.patchcore == augmented.patchcore
+    assert vanilla.evaluation == augmented.evaluation
+    assert vanilla.test_shift == augmented.test_shift
+    assert vanilla.test_shift.kind == "brightness"
+    assert vanilla.test_shift.factor == 0.8
+    assert vanilla.augmentation.enabled is False
+    assert augmented.augmentation.enabled is True

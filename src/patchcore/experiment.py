@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 import patchcore.backbones
+from patchcore.augmentation import FixedIlluminationTransform
 from patchcore.augmentation import RandomIlluminationTransform
 import patchcore.common
 import patchcore.metrics
@@ -84,6 +85,9 @@ class ExperimentRunner:
             "augmentation_brightness={}".format(config.augmentation.brightness),
             "augmentation_contrast={}".format(config.augmentation.contrast),
             "augmentation_gamma={}".format(config.augmentation.gamma),
+            "test_shift_enabled={}".format(config.test_shift.enabled),
+            "test_shift_kind={}".format(config.test_shift.kind),
+            "test_shift_factor={}".format(config.test_shift.factor),
         ]
         train_dataset, test_dataset = self._datasets(config)
         event_log.extend(
@@ -159,6 +163,12 @@ class ExperimentRunner:
                 "contrast": list(config.augmentation.contrast),
                 "gamma": list(config.augmentation.gamma),
             },
+            "test_condition": self._test_condition(config),
+            "test_shift": {
+                "enabled": config.test_shift.enabled,
+                "kind": config.test_shift.kind,
+                "factor": config.test_shift.factor,
+            },
         }
         if not np.isfinite([metrics["i_auroc"], metrics["p_auroc"]]).all():
             raise AssertionError("Scientific baseline produced NaN or Inf metrics.")
@@ -169,6 +179,7 @@ class ExperimentRunner:
             anomaly_maps=np.asarray(anomaly_maps),
             labels=np.asarray(labels),
             masks=np.asarray(masks),
+            image_paths=np.asarray([item[2] for item in test_dataset.data_to_iterate]),
         )
         self._save_anomaly_maps(run_directory / "anomaly_maps", anomaly_maps)
         event_log.extend(
@@ -202,14 +213,29 @@ class ExperimentRunner:
             if config.augmentation.enabled
             else None
         )
+        test_transform = (
+            FixedIlluminationTransform(config.test_shift.kind, config.test_shift.factor)
+            if config.test_shift.enabled
+            else None
+        )
         return (
             MVTecDataset(
                 split=DatasetSplit.TRAIN,
                 image_transform=train_transform,
                 **common,
             ),
-            MVTecDataset(split=DatasetSplit.TEST, **common),
+            MVTecDataset(
+                split=DatasetSplit.TEST,
+                image_transform=test_transform,
+                **common,
+            ),
         )
+
+    @staticmethod
+    def _test_condition(config: AppConfig) -> str:
+        if not config.test_shift.enabled:
+            return "original"
+        return "{}_{}".format(config.test_shift.kind, config.test_shift.factor)
 
     @staticmethod
     def _create_run_directory(output_root: Path, config: AppConfig) -> Path:

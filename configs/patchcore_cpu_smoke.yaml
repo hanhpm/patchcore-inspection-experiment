@@ -35,3 +35,8 @@ augmentation:
   brightness: [1.0, 1.0]
   contrast: [1.0, 1.0]
   gamma: [1.0, 1.0]
+
+test_shift:
+  enabled: false
+  kind: none
+  factor: 1.0
