@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from patchcore.augmentation import FixedIlluminationTransform
+from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit, MVTecDataset
 
 
@@ -17,10 +18,15 @@ class BrightnessShiftValidator:
     """Check that fixed photometric shifts preserve geometry and masks."""
 
     def run(
-        self, dataset_root: Path, class_name: str, output_dir: Path
+        self,
+        dataset_root: Path,
+        class_name: str,
+        output_dir: Path,
+        dataset_name: str = "mvtec",
     ) -> Dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        dataset = MVTecDataset(
+        dataset = create_dataset(
+            dataset_name,
             source=str(dataset_root),
             classname=class_name,
             split=DatasetSplit.TEST,
@@ -87,6 +93,7 @@ class BrightnessShiftValidator:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset-name", default="mvtec")
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--class-name", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -96,7 +103,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     report = BrightnessShiftValidator().run(
-        args.dataset_root, args.class_name, args.output_dir
+        args.dataset_root, args.class_name, args.output_dir, args.dataset_name
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     print("PASS")

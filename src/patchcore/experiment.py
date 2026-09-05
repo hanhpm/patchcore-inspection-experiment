@@ -23,6 +23,7 @@ import patchcore.patchcore
 import patchcore.sampler
 import patchcore.utils
 from patchcore.config import AppConfig, ConfigLoader
+from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit, MVTecDataset
 from patchcore.device import DeviceManager
 
@@ -63,8 +64,6 @@ class ExperimentRunner:
     def run(self, config_path: Path, output_root: Path) -> Path:
         config_path = config_path.resolve()
         config = ConfigLoader().load(config_path)
-        if config.dataset.name != "mvtec":
-            raise ValueError("The shared runner currently supports dataset.name=mvtec.")
         device = DeviceManager().resolve(config.device.requested)
         patchcore.utils.fix_seeds(
             config.experiment.seed, with_cuda=device.type == "cuda"
@@ -129,7 +128,12 @@ class ExperimentRunner:
         pixel_auroc = patchcore.metrics.compute_pixelwise_retrieval_metrics(
             anomaly_maps, masks
         )["auroc"]
-        aupro_result = (
+        aupro_005_result = (
+            patchcore.metrics.compute_aupro(anomaly_maps, masks, fpr_limit=0.05)
+            if config.evaluation.au_pro
+            else None
+        )
+        aupro_030_result = (
             patchcore.metrics.compute_aupro(anomaly_maps, masks, fpr_limit=0.3)
             if config.evaluation.au_pro
             else None
@@ -139,15 +143,21 @@ class ExperimentRunner:
             "class_name": config.dataset.class_name,
             "i_auroc": float(image_auroc),
             "p_auroc": float(pixel_auroc),
-            "au_pro": aupro_result["aupro"] if aupro_result else None,
-            "au_pro_status": "computed" if aupro_result else "disabled",
-            "au_pro_fpr_limit": aupro_result["fpr_limit"] if aupro_result else None,
-            "au_pro_implementation": (
-                aupro_result["implementation"] if aupro_result else None
+            "au_pro": aupro_030_result["aupro"] if aupro_030_result else None,
+            "au_pro_0.05": aupro_005_result["aupro"] if aupro_005_result else None,
+            "au_pro_0.30": aupro_030_result["aupro"] if aupro_030_result else None,
+            "au_pro_status": "computed" if aupro_030_result else "disabled",
+            "au_pro_fpr_limit": (
+                aupro_030_result["fpr_limit"] if aupro_030_result else None
             ),
-            "au_pro_protocol": aupro_result["protocol"] if aupro_result else None,
+            "au_pro_implementation": (
+                aupro_030_result["implementation"] if aupro_030_result else None
+            ),
+            "au_pro_protocol": (
+                aupro_030_result["protocol"] if aupro_030_result else None
+            ),
             "au_pro_regions": (
-                aupro_result["number_of_regions"] if aupro_result else None
+                aupro_030_result["number_of_regions"] if aupro_030_result else None
             ),
             "runtime_seconds": runtime_seconds,
             "fit_seconds": fit_seconds,
@@ -187,7 +197,8 @@ class ExperimentRunner:
                 "event=metrics_computed",
                 "i_auroc={}".format(metrics["i_auroc"]),
                 "p_auroc={}".format(metrics["p_auroc"]),
-                "au_pro={}".format(metrics["au_pro"]),
+                "au_pro_0.05={}".format(metrics["au_pro_0.05"]),
+                "au_pro_0.30={}".format(metrics["au_pro_0.30"]),
                 "event=artifacts_saved",
                 "timestamp_utc={} event=run_completed status=PASS".format(
                     datetime.now(timezone.utc).isoformat()
@@ -219,12 +230,14 @@ class ExperimentRunner:
             else None
         )
         return (
-            MVTecDataset(
+            create_dataset(
+                config.dataset.name,
                 split=DatasetSplit.TRAIN,
                 image_transform=train_transform,
                 **common,
             ),
-            MVTecDataset(
+            create_dataset(
+                config.dataset.name,
                 split=DatasetSplit.TEST,
                 image_transform=test_transform,
                 **common,

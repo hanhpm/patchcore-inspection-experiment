@@ -7,6 +7,7 @@ from typing import Any, Dict
 import torch
 
 from patchcore.config import ConfigLoader
+from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit
 from patchcore.datasets.mvtec import MVTecDataset
 
@@ -16,17 +17,18 @@ class DatasetSmokeTester:
 
     def run(self, config_path: Path) -> Dict[str, Any]:
         config = ConfigLoader().load(config_path)
-        if config.dataset.name != "mvtec":
-            raise ValueError("Only the existing MVTec adapter is currently supported.")
-
         common_args = {
             "source": str(config.dataset.root),
             "classname": config.dataset.class_name,
             "resize": config.dataset.resize,
             "imagesize": config.dataset.image_size,
         }
-        train_dataset = MVTecDataset(split=DatasetSplit.TRAIN, **common_args)
-        test_dataset = MVTecDataset(split=DatasetSplit.TEST, **common_args)
+        train_dataset = create_dataset(
+            config.dataset.name, split=DatasetSplit.TRAIN, **common_args
+        )
+        test_dataset = create_dataset(
+            config.dataset.name, split=DatasetSplit.TEST, **common_args
+        )
 
         train_anomalies = [
             item for item in train_dataset.data_to_iterate if item[1] != "good"

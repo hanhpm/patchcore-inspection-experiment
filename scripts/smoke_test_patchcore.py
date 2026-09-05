@@ -15,6 +15,7 @@ import patchcore.sampler
 import patchcore.utils
 from patchcore.config import AppConfig
 from patchcore.config import ConfigLoader
+from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit
 from patchcore.datasets.mvtec import MVTecDataset
 from patchcore.device import DeviceManager
@@ -29,7 +30,8 @@ class PatchCoreSmokeTester:
         patchcore.utils.fix_seeds(
             config.experiment.seed, with_cuda=device.type == "cuda"
         )
-        dataset = MVTecDataset(
+        dataset = create_dataset(
+            config.dataset.name,
             source=str(config.dataset.root),
             classname=config.dataset.class_name,
             resize=config.dataset.resize,
@@ -124,7 +126,8 @@ class PatchCoreSmokeTester:
                     "memory_bank_shape": list(memory_bank.shape),
                 }
             )
-            test_dataset = MVTecDataset(
+            test_dataset = create_dataset(
+                config.dataset.name,
                 source=str(config.dataset.root),
                 classname=config.dataset.class_name,
                 resize=config.dataset.resize,
@@ -144,6 +147,20 @@ class PatchCoreSmokeTester:
             if (item[1] != "good") == is_anomaly:
                 return dataset[index]
         raise AssertionError("Required test sample was not found.")
+
+    @staticmethod
+    def _positive_mask_indices(
+        dataset: MVTecDataset, anomaly_indices: list, count: int
+    ) -> list:
+        selected = []
+        for index in anomaly_indices:
+            if torch.any(dataset[index]["mask"] > 0):
+                selected.append(index)
+            if len(selected) == count:
+                break
+        if len(selected) < count:
+            raise AssertionError("Not enough anomalous samples with positive masks.")
+        return selected
 
     @staticmethod
     def _score_sample(
@@ -190,8 +207,11 @@ class PatchCoreSmokeTester:
         ]
         normal_count = min(max_samples // 2, len(normal_indices))
         anomaly_count = min(max_samples - normal_count, len(anomaly_indices))
-        selected_indices = (
-            normal_indices[:normal_count] + anomaly_indices[:anomaly_count]
+        selected_indices = normal_indices[:normal_count]
+        selected_indices.extend(
+            PatchCoreSmokeTester._positive_mask_indices(
+                dataset, anomaly_indices, anomaly_count
+            )
         )
         loader = torch.utils.data.DataLoader(
             torch.utils.data.Subset(dataset, selected_indices),
@@ -205,7 +225,12 @@ class PatchCoreSmokeTester:
         pixel_metrics = patchcore.metrics.compute_pixelwise_retrieval_metrics(
             anomaly_maps, masks
         )
-        aupro_metrics = (
+        aupro_005_metrics = (
+            patchcore.metrics.compute_aupro(anomaly_maps, masks, fpr_limit=0.05)
+            if config.evaluation.au_pro
+            else None
+        )
+        aupro_030_metrics = (
             patchcore.metrics.compute_aupro(anomaly_maps, masks, fpr_limit=0.3)
             if config.evaluation.au_pro
             else None
@@ -219,9 +244,11 @@ class PatchCoreSmokeTester:
             "evaluation_anomaly_images": anomaly_count,
             "debug_image_auroc": float(image_metrics["auroc"]),
             "debug_pixel_auroc": float(pixel_metrics["auroc"]),
-            "debug_au_pro": aupro_metrics["aupro"] if aupro_metrics else None,
-            "debug_au_pro_fpr_limit": (
-                aupro_metrics["fpr_limit"] if aupro_metrics else None
+            "debug_au_pro_0.05": (
+                aupro_005_metrics["aupro"] if aupro_005_metrics else None
+            ),
+            "debug_au_pro_0.30": (
+                aupro_030_metrics["aupro"] if aupro_030_metrics else None
             ),
         }
 
