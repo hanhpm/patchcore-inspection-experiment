@@ -16,7 +16,10 @@ import patchcore.utils
 
 LOGGER = logging.getLogger(__name__)
 
-_DATASETS = {"mvtec": ["patchcore.datasets.mvtec", "MVTecDataset"]}
+_DATASETS = {
+    "mvtec": ["patchcore.datasets.mvtec", "MVTecDataset"],
+    "mvtec_ad2": ["patchcore.datasets.mvtec_ad2", "MVTecAD2Dataset"],
+}
 
 
 @click.group(chain=True)
@@ -183,8 +186,14 @@ def run(
                 segmentations, masks_gt
             )
             full_pixel_auroc = pixel_scores["auroc"]
+            full_pixel_aupro_005 = patchcore.metrics.compute_aupro(
+                segmentations, masks_gt, fpr_limit=0.05
+            )["aupro"]
+            full_pixel_aupro_030 = patchcore.metrics.compute_aupro(
+                segmentations, masks_gt, fpr_limit=0.30
+            )["aupro"]
 
-            # Compute PRO score & PW Auroc only images with anomalies
+            # Compute PW Auroc only images with anomalies
             sel_idxs = []
             for i in range(len(masks_gt)):
                 if np.sum(masks_gt[i]) > 0:
@@ -200,6 +209,8 @@ def run(
                     "dataset_name": dataset_name,
                     "instance_auroc": auroc,
                     "full_pixel_auroc": full_pixel_auroc,
+                    "full_pixel_aupro_005": full_pixel_aupro_005,
+                    "full_pixel_aupro_030": full_pixel_aupro_030,
                     "anomaly_pixel_auroc": anomaly_pixel_auroc,
                 }
             )

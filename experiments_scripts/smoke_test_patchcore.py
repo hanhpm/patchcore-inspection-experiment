@@ -13,8 +13,8 @@ import patchcore.metrics
 import patchcore.patchcore
 import patchcore.sampler
 import patchcore.utils
-from patchcore.config import AppConfig
-from patchcore.config import ConfigLoader
+from config.config import AppConfig
+from config.config import ConfigLoader
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit
 from patchcore.datasets.mvtec import MVTecDataset

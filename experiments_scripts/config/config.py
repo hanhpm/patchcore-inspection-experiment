@@ -63,6 +63,12 @@ class TestShiftConfig:
 
 
 @dataclass(frozen=True)
+class AdapterConfig:
+    enabled: bool = False
+    type: str = "identity"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     experiment: ExperimentConfig
     device: DeviceConfig
@@ -71,6 +77,7 @@ class AppConfig:
     evaluation: EvaluationConfig
     augmentation: IlluminationAugmentationConfig
     test_shift: TestShiftConfig
+    adapter: AdapterConfig
 
 
 class ConfigLoader:
@@ -100,10 +107,13 @@ class ConfigLoader:
                     augmentation_raw[key] = tuple(augmentation_raw[key])
             augmentation = IlluminationAugmentationConfig(**augmentation_raw)
             test_shift = TestShiftConfig(**raw.get("test_shift", {}))
+            adapter = AdapterConfig(**raw.get("adapter", {}))
         except (KeyError, TypeError) as error:
             raise ValueError("Invalid PatchCore configuration: {}".format(error))
 
-        self._validate(experiment, device, dataset, patchcore, augmentation, test_shift)
+        self._validate(
+            experiment, device, dataset, patchcore, augmentation, test_shift, adapter
+        )
         return AppConfig(
             experiment,
             device,
@@ -112,6 +122,7 @@ class ConfigLoader:
             evaluation,
             augmentation,
             test_shift,
+            adapter,
         )
 
     @staticmethod
@@ -122,6 +133,7 @@ class ConfigLoader:
         patchcore: PatchCoreConfig,
         augmentation: IlluminationAugmentationConfig,
         test_shift: TestShiftConfig,
+        adapter: AdapterConfig,
     ) -> None:
         if experiment.seed < 0:
             raise ValueError("Experiment seed must be non-negative.")
@@ -151,3 +163,5 @@ class ConfigLoader:
             raise ValueError("Test shift factor must be positive.")
         if test_shift.enabled and test_shift.kind == "none":
             raise ValueError("Enabled test shift requires a non-none kind.")
+        if adapter.type not in {"identity"}:
+            raise ValueError("Unsupported adapter type: {}.".format(adapter.type))

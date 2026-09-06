@@ -15,14 +15,15 @@ import numpy as np
 import torch
 
 import patchcore.backbones
-from patchcore.augmentation import FixedIlluminationTransform
-from patchcore.augmentation import RandomIlluminationTransform
+from augmentation import FixedIlluminationTransform
+from augmentation import RandomIlluminationTransform
+from patchcore.adapter import create_feature_adapter
 import patchcore.common
 import patchcore.metrics
 import patchcore.patchcore
 import patchcore.sampler
 import patchcore.utils
-from patchcore.config import AppConfig, ConfigLoader
+from config.config import AppConfig, ConfigLoader
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit, MVTecDataset
 from patchcore.device import DeviceManager
@@ -39,6 +40,11 @@ class PatchCoreFactory:
             percentage=config.patchcore.coreset_ratio, device=device
         )
         model = patchcore.patchcore.PatchCore(device)
+        feature_adapter = (
+            create_feature_adapter(config.adapter.type)
+            if config.adapter.enabled
+            else None
+        )
         model.load(
             backbone=backbone,
             layers_to_extract_from=list(config.patchcore.feature_layers),
@@ -51,6 +57,10 @@ class PatchCoreFactory:
             featuresampler=sampler,
             # The installed dependency is faiss-cpu; feature extraction can still use CUDA.
             nn_method=patchcore.common.FaissNN(on_gpu=False),
+            feature_adapter=feature_adapter,
+            feature_adapter_type=(
+                config.adapter.type if config.adapter.enabled else "none"
+            ),
         )
         return model
 

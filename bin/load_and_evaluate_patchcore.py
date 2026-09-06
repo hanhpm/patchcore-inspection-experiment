@@ -16,7 +16,10 @@ import patchcore.utils
 
 LOGGER = logging.getLogger(__name__)
 
-_DATASETS = {"mvtec": ["patchcore.datasets.mvtec", "MVTecDataset"]}
+_DATASETS = {
+    "mvtec": ["patchcore.datasets.mvtec", "MVTecDataset"],
+    "mvtec_ad2": ["patchcore.datasets.mvtec_ad2", "MVTecAD2Dataset"],
+}
 
 
 @click.group(chain=True)
@@ -155,8 +158,14 @@ def run(methods, results_path, gpu, seed, save_segmentation_images):
                 segmentations, masks_gt
             )
             full_pixel_auroc = pixel_scores["auroc"]
+            full_pixel_aupro_005 = patchcore.metrics.compute_aupro(
+                segmentations, masks_gt, fpr_limit=0.05
+            )["aupro"]
+            full_pixel_aupro_030 = patchcore.metrics.compute_aupro(
+                segmentations, masks_gt, fpr_limit=0.30
+            )["aupro"]
 
-            # Compute PRO score & PW Auroc only for images with anomalies
+            # Compute PW Auroc only for images with anomalies
             sel_idxs = []
             for i in range(len(masks_gt)):
                 if np.sum(masks_gt[i]) > 0:
@@ -171,6 +180,8 @@ def run(methods, results_path, gpu, seed, save_segmentation_images):
                     "dataset_name": dataset_name,
                     "instance_auroc": auroc,
                     "full_pixel_auroc": full_pixel_auroc,
+                    "full_pixel_aupro_005": full_pixel_aupro_005,
+                    "full_pixel_aupro_030": full_pixel_aupro_030,
                     "anomaly_pixel_auroc": anomaly_pixel_auroc,
                 }
             )
@@ -245,7 +256,14 @@ def patch_core_loader(patch_core_paths, faiss_on_gpu, faiss_num_workers):
 @click.option("--imagesize", default=224, type=int, show_default=True)
 @click.option("--augment", is_flag=True)
 def dataset(
-    name, data_path, subdatasets, batch_size, resize, imagesize, num_workers, augment
+    name,
+    data_path,
+    subdatasets,
+    batch_size,
+    resize,
+    imagesize,
+    num_workers,
+    augment,
 ):
     dataset_info = _DATASETS[name]
     dataset_library = __import__(dataset_info[0], fromlist=[dataset_info[1]])

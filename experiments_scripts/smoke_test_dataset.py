@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import torch
 
-from patchcore.config import ConfigLoader
+from config.config import ConfigLoader
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit
 from patchcore.datasets.mvtec import MVTecDataset

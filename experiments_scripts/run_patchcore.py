@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from patchcore.experiment import ExperimentRunner
+from experiment import ExperimentRunner
 
 
 def parse_args() -> argparse.Namespace:

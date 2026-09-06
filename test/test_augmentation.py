@@ -3,9 +3,9 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
-from patchcore.augmentation import FixedIlluminationTransform
-from patchcore.augmentation import RandomIlluminationTransform
-from patchcore.config import IlluminationAugmentationConfig
+from experiments_scripts.augmentation import FixedIlluminationTransform
+from experiments_scripts.augmentation import RandomIlluminationTransform
+from experiments_scripts.config.config import IlluminationAugmentationConfig
 
 
 def test_identity_illumination_transform_preserves_pixels():

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import tqdm
 
 import patchcore
+import patchcore.adapter
 import patchcore.backbones
 import patchcore.common
 import patchcore.sampler
@@ -36,6 +37,8 @@ class PatchCore(torch.nn.Module):
         anomaly_score_num_nn=1,
         featuresampler=patchcore.sampler.IdentitySampler(),
         nn_method=patchcore.common.FaissNN(False, 4),
+        feature_adapter=None,
+        feature_adapter_type="none",
         **kwargs,
     ):
         # PatchCore uses a fixed ImageNet representation; freezing it prevents
@@ -69,6 +72,9 @@ class PatchCore(torch.nn.Module):
         _ = preadapt_aggregator.to(self.device)
 
         self.forward_modules["preadapt_aggregator"] = preadapt_aggregator
+        self.feature_adapter_type = feature_adapter_type
+        if feature_adapter is not None:
+            self.forward_modules["feature_adapter"] = feature_adapter.to(self.device)
 
         self.anomaly_scorer = patchcore.common.NearestNeighbourScorer(
             n_nearest_neighbours=anomaly_score_num_nn, nn_method=nn_method
@@ -143,6 +149,8 @@ class PatchCore(torch.nn.Module):
         # sized features, these are brought into the correct form here.
         features = self.forward_modules["preprocessing"](features)
         features = self.forward_modules["preadapt_aggregator"](features)
+        if "feature_adapter" in self.forward_modules:
+            features = self.forward_modules["feature_adapter"](features)
 
         if provide_patch_shapes:
             return _detach(features), patch_shapes
@@ -253,6 +261,7 @@ class PatchCore(torch.nn.Module):
             "patchsize": self.patch_maker.patchsize,
             "patchstride": self.patch_maker.stride,
             "anomaly_scorer_num_nn": self.anomaly_scorer.n_nearest_neighbours,
+            "feature_adapter_type": self.feature_adapter_type,
         }
         with open(self._params_file(save_path, prepend), "wb") as save_file:
             pickle.dump(patchcore_params, save_file, pickle.HIGHEST_PROTOCOL)
@@ -272,6 +281,11 @@ class PatchCore(torch.nn.Module):
         )
         patchcore_params["backbone"].name = patchcore_params["backbone.name"]
         del patchcore_params["backbone.name"]
+        feature_adapter_type = patchcore_params.get("feature_adapter_type", "none")
+        if feature_adapter_type == "identity":
+            patchcore_params["feature_adapter"] = (
+                patchcore.adapter.create_feature_adapter(feature_adapter_type)
+            )
         self.load(**patchcore_params, device=device, nn_method=nn_method)
 
         self.anomaly_scorer.load(load_path, prepend)

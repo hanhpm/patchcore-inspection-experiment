@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from patchcore.augmentation import FixedIlluminationTransform
+from augmentation import FixedIlluminationTransform
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit, MVTecDataset
 

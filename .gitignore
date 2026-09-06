@@ -1,5 +1,13 @@
 .idea/
 __pycache__/
 LabletAnomaly.egg-info/
-experiments/*
+experiments_results/*
 !experiments/.gitkeep
+
+experiments_plan/*
+
+CRITERIA.md
+AGENTS.md
+uv_guide.md
+
+results/*

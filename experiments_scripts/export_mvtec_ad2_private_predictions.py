@@ -18,11 +18,11 @@ from PIL import Image
 import patchcore.metrics
 import patchcore.patchcore
 import patchcore.utils
-from patchcore.config import AppConfig, ConfigLoader
+from config.config import AppConfig, ConfigLoader
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit
 from patchcore.device import DeviceManager
-from patchcore.experiment import PatchCoreFactory
+from experiment import PatchCoreFactory
 
 
 def parse_args() -> argparse.Namespace:

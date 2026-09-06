@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple
 from PIL import Image
 from torchvision.transforms import functional
 
-from patchcore.config import IlluminationAugmentationConfig
+from config.config import IlluminationAugmentationConfig
 
 
 class RandomIlluminationTransform:

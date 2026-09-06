@@ -9,7 +9,16 @@ from torchvision import transforms
 
 from patchcore.datasets.mvtec import DatasetSplit, IMAGENET_MEAN, IMAGENET_STD
 
-_CLASSNAMES = ["sheet_metal"]
+_CLASSNAMES = [
+    "can",
+    "fabric",
+    "fruit_jelly",
+    "rice",
+    "sheet_metal",
+    "vial",
+    "wallplugs",
+    "walnuts",
+]
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from patchcore.config import ConfigLoader
+from experiments_scripts.config.config import ConfigLoader
 
 
 def test_baseline_config_loads_with_expected_frozen_values():
@@ -21,6 +21,8 @@ def test_baseline_config_loads_with_expected_frozen_values():
     assert config.augmentation.brightness == (1.0, 1.0)
     assert config.test_shift.enabled is False
     assert config.test_shift.kind == "none"
+    assert config.adapter.enabled is False
+    assert config.adapter.type == "identity"
 
 
 def test_illumination_config_changes_only_augmentation_settings():
