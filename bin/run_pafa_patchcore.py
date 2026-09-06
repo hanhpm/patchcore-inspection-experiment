@@ -1,4 +1,5 @@
 import contextlib
+import json
 import logging
 import os
 import sys
@@ -13,6 +14,10 @@ import patchcore.metrics
 import patchcore.patchcore
 import patchcore.sampler
 import patchcore.utils
+from patchcore.adapter import create_feature_adapter
+from patchcore.modules_pafa.diagnostics import compute_e3_diagnostics
+from patchcore.modules_pafa.trainer import PAFAAdapterTrainer
+from patchcore.modules_pafa.trainer import PAFATrainingConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +90,7 @@ def run(
                 device,
             )
             PatchCore_list = methods["get_patchcore"](imagesize, sampler, device)
+            pafa_diagnostics = []
             if len(PatchCore_list) > 1:
                 LOGGER.info(
                     "Utilizing PatchCore Ensemble (N={}).".format(len(PatchCore_list))
@@ -97,7 +103,37 @@ def run(
                     "Training models ({}/{})".format(i + 1, len(PatchCore_list))
                 )
                 torch.cuda.empty_cache()
+                if PatchCore.feature_adapter_type == "pafa_residual":
+                    LOGGER.info("Training PAFA residual adapter.")
+                    pafa_result = PatchCore.train_feature_adapter(
+                        dataloaders["training"]
+                    )
+                    LOGGER.info(
+                        "PAFA adapter displacement: {}".format(
+                            pafa_result.adapter_displacement
+                        )
+                    )
+                    pafa_diagnostics.append(
+                        {
+                            "dataset_name": dataset_name,
+                            "model_index": i,
+                            "feature_adapter_type": PatchCore.feature_adapter_type,
+                            "losses": pafa_result.losses,
+                            "loss_components": pafa_result.loss_components,
+                            "adapter_displacement": pafa_result.adapter_displacement,
+                        }
+                    )
                 PatchCore.fit(dataloaders["training"])
+            if pafa_diagnostics:
+                pafa_save_path = os.path.join(run_save_path, "pafa_diagnostics")
+                os.makedirs(pafa_save_path, exist_ok=True)
+                with open(
+                    os.path.join(pafa_save_path, dataset_name + ".json"),
+                    "w",
+                    encoding="utf-8",
+                ) as save_file:
+                    json.dump(pafa_diagnostics, save_file, indent=2, sort_keys=True)
+                    save_file.write("\n")
 
             torch.cuda.empty_cache()
             aggregator = {"scores": [], "segmentations": []}
@@ -203,6 +239,17 @@ def run(
                 [masks_gt[i] for i in sel_idxs],
             )
             anomaly_pixel_auroc = pixel_scores["auroc"]
+            adapter_displacement = None
+            if pafa_diagnostics:
+                adapter_displacement = float(
+                    np.mean(
+                        [
+                            item["adapter_displacement"]
+                            for item in pafa_diagnostics
+                            if item["dataset_name"] == dataset_name
+                        ]
+                    )
+                )
 
             result_collect.append(
                 {
@@ -214,6 +261,27 @@ def run(
                     "anomaly_pixel_auroc": anomaly_pixel_auroc,
                 }
             )
+            if adapter_displacement is not None:
+                e3_diagnostics = compute_e3_diagnostics(
+                    scores=scores,
+                    anomaly_labels=anomaly_labels,
+                    adapter_displacement=adapter_displacement,
+                    aupro_005=full_pixel_aupro_005,
+                )
+                pafa_save_path = os.path.join(run_save_path, "pafa_diagnostics")
+                os.makedirs(pafa_save_path, exist_ok=True)
+                with open(
+                    os.path.join(pafa_save_path, dataset_name + "_e3_summary.json"),
+                    "w",
+                    encoding="utf-8",
+                ) as save_file:
+                    json.dump(e3_diagnostics, save_file, indent=2, sort_keys=True)
+                    save_file.write("\n")
+                LOGGER.info(
+                    "PAFA E3 real GT margin: {}".format(
+                        e3_diagnostics["real_gt_margin"]
+                    )
+                )
 
             for key, item in result_collect[-1].items():
                 if key != "dataset_name":
@@ -267,6 +335,29 @@ def run(
 # NN on GPU.
 @click.option("--faiss_on_gpu", is_flag=True)
 @click.option("--faiss_num_workers", type=int, default=8)
+@click.option(
+    "--feature_adapter",
+    type=click.Choice(["none", "identity", "pafa_residual"]),
+    default="none",
+    show_default=True,
+)
+@click.option("--pafa_bottleneck_dimension", type=int, default=128, show_default=True)
+@click.option("--pafa_alpha", type=float, default=1.0, show_default=True)
+@click.option("--pafa_epochs", type=int, default=1, show_default=True)
+@click.option("--pafa_learning_rate", type=float, default=0.0001, show_default=True)
+@click.option(
+    "--pafa_gaussian_noise_std", type=float, default=0.015, show_default=True
+)
+@click.option("--pafa_pseudo_margin", type=float, default=0.5, show_default=True)
+@click.option(
+    "--pafa_nominal_preservation_weight", type=float, default=1.0, show_default=True
+)
+@click.option(
+    "--pafa_discriminator_hidden_dimension", type=int, default=256, show_default=True
+)
+@click.option(
+    "--pafa_discriminator_loss_weight", type=float, default=0.0, show_default=True
+)
 def patch_core(
     backbone_names,
     layers_to_extract_from,
@@ -281,6 +372,16 @@ def patch_core(
     patchsize_aggregate,
     faiss_on_gpu,
     faiss_num_workers,
+    feature_adapter,
+    pafa_bottleneck_dimension,
+    pafa_alpha,
+    pafa_epochs,
+    pafa_learning_rate,
+    pafa_gaussian_noise_std,
+    pafa_pseudo_margin,
+    pafa_nominal_preservation_weight,
+    pafa_discriminator_hidden_dimension,
+    pafa_discriminator_loss_weight,
 ):
     backbone_names = list(backbone_names)
     if len(backbone_names) > 1:
@@ -306,6 +407,14 @@ def patch_core(
             backbone.name, backbone.seed = backbone_name, backbone_seed
 
             nn_method = patchcore.common.FaissNN(faiss_on_gpu, faiss_num_workers)
+            adapter = None
+            if feature_adapter != "none":
+                adapter = create_feature_adapter(
+                    feature_adapter,
+                    embedding_dimension=target_embed_dimension,
+                    bottleneck_dimension=pafa_bottleneck_dimension,
+                    alpha=pafa_alpha,
+                )
 
             patchcore_instance = patchcore.patchcore.PatchCore(device)
             patchcore_instance.load(
@@ -319,7 +428,29 @@ def patch_core(
                 featuresampler=sampler,
                 anomaly_scorer_num_nn=anomaly_scorer_num_nn,
                 nn_method=nn_method,
+                feature_adapter=adapter,
+                feature_adapter_type=feature_adapter,
             )
+            if feature_adapter == "pafa_residual":
+                patchcore_instance.set_feature_adapter_trainer(
+                    PAFAAdapterTrainer(
+                        PAFATrainingConfig(
+                            epochs=pafa_epochs,
+                            learning_rate=pafa_learning_rate,
+                            gaussian_noise_std=pafa_gaussian_noise_std,
+                            pseudo_margin=pafa_pseudo_margin,
+                            nominal_preservation_weight=(
+                                pafa_nominal_preservation_weight
+                            ),
+                            discriminator_hidden_dimension=(
+                                pafa_discriminator_hidden_dimension
+                            ),
+                            discriminator_loss_weight=(
+                                pafa_discriminator_loss_weight
+                            ),
+                        )
+                    )
+                )
             loaded_patchcores.append(patchcore_instance)
         return loaded_patchcores
 

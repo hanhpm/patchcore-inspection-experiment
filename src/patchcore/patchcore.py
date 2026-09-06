@@ -23,6 +23,7 @@ class PatchCore(torch.nn.Module):
         """PatchCore anomaly detection class."""
         super(PatchCore, self).__init__()
         self.device = device
+        self.feature_adapter_trainer = None
 
     def load(
         self,
@@ -75,6 +76,7 @@ class PatchCore(torch.nn.Module):
         self.feature_adapter_type = feature_adapter_type
         if feature_adapter is not None:
             self.forward_modules["feature_adapter"] = feature_adapter.to(self.device)
+        self.feature_adapter_trainer = None
 
         self.anomaly_scorer = patchcore.common.NearestNeighbourScorer(
             n_nearest_neighbours=anomaly_score_num_nn, nn_method=nn_method
@@ -98,7 +100,13 @@ class PatchCore(torch.nn.Module):
             return features
         return self._embed(data)
 
-    def _embed(self, images, detach=True, provide_patch_shapes=False):
+    def _embed(
+        self,
+        images,
+        detach=True,
+        provide_patch_shapes=False,
+        apply_feature_adapter=True,
+    ):
         """Returns feature embeddings for images."""
 
         def _detach(features):
@@ -149,7 +157,7 @@ class PatchCore(torch.nn.Module):
         # sized features, these are brought into the correct form here.
         features = self.forward_modules["preprocessing"](features)
         features = self.forward_modules["preadapt_aggregator"](features)
-        if "feature_adapter" in self.forward_modules:
+        if apply_feature_adapter and "feature_adapter" in self.forward_modules:
             features = self.forward_modules["feature_adapter"](features)
 
         if provide_patch_shapes:
@@ -163,6 +171,14 @@ class PatchCore(torch.nn.Module):
         memory bank of SPADE.
         """
         self._fill_memory_bank(training_data)
+
+    def set_feature_adapter_trainer(self, trainer):
+        self.feature_adapter_trainer = trainer
+
+    def train_feature_adapter(self, training_data):
+        if self.feature_adapter_trainer is None:
+            raise ValueError("No feature adapter trainer is configured.")
+        return self.feature_adapter_trainer.train(self, training_data)
 
     def _fill_memory_bank(self, input_data):
         """Computes and sets the support features for SPADE."""
@@ -243,6 +259,10 @@ class PatchCore(torch.nn.Module):
     def _params_file(filepath, prepend=""):
         return os.path.join(filepath, prepend + "patchcore_params.pkl")
 
+    @staticmethod
+    def _feature_adapter_file(filepath, prepend=""):
+        return os.path.join(filepath, prepend + "feature_adapter.pt")
+
     def save_to_path(self, save_path: str, prepend: str = "") -> None:
         LOGGER.info("Saving PatchCore data.")
         self.anomaly_scorer.save(
@@ -263,6 +283,18 @@ class PatchCore(torch.nn.Module):
             "anomaly_scorer_num_nn": self.anomaly_scorer.n_nearest_neighbours,
             "feature_adapter_type": self.feature_adapter_type,
         }
+        if "feature_adapter" in self.forward_modules:
+            feature_adapter = self.forward_modules["feature_adapter"]
+            patchcore_params["feature_adapter_alpha"] = getattr(
+                feature_adapter, "alpha", None
+            )
+            patchcore_params["feature_adapter_bottleneck_dimension"] = getattr(
+                feature_adapter, "bottleneck_dimension", None
+            )
+            torch.save(
+                feature_adapter.state_dict(),
+                self._feature_adapter_file(save_path, prepend),
+            )
         with open(self._params_file(save_path, prepend), "wb") as save_file:
             pickle.dump(patchcore_params, save_file, pickle.HIGHEST_PROTOCOL)
 
@@ -282,11 +314,31 @@ class PatchCore(torch.nn.Module):
         patchcore_params["backbone"].name = patchcore_params["backbone.name"]
         del patchcore_params["backbone.name"]
         feature_adapter_type = patchcore_params.get("feature_adapter_type", "none")
-        if feature_adapter_type == "identity":
+        if feature_adapter_type in {"identity", "pafa_residual"}:
             patchcore_params["feature_adapter"] = (
-                patchcore.adapter.create_feature_adapter(feature_adapter_type)
+                patchcore.adapter.create_feature_adapter(
+                    feature_adapter_type,
+                    embedding_dimension=patchcore_params["target_embed_dimension"],
+                    bottleneck_dimension=patchcore_params.pop(
+                        "feature_adapter_bottleneck_dimension", 128
+                    ),
+                    alpha=patchcore_params.pop("feature_adapter_alpha", 1.0),
+                )
             )
+        else:
+            patchcore_params.pop("feature_adapter_bottleneck_dimension", None)
+            patchcore_params.pop("feature_adapter_alpha", None)
         self.load(**patchcore_params, device=device, nn_method=nn_method)
+        if (
+            "feature_adapter" in self.forward_modules
+            and os.path.exists(self._feature_adapter_file(load_path, prepend))
+        ):
+            self.forward_modules["feature_adapter"].load_state_dict(
+                torch.load(
+                    self._feature_adapter_file(load_path, prepend),
+                    map_location=device,
+                )
+            )
 
         self.anomaly_scorer.load(load_path, prepend)
 
