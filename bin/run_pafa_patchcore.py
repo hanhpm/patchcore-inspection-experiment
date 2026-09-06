@@ -120,6 +120,7 @@ def run(
                             "feature_adapter_type": PatchCore.feature_adapter_type,
                             "losses": pafa_result.losses,
                             "loss_components": pafa_result.loss_components,
+                            "training_config": pafa_result.training_config,
                             "adapter_displacement": pafa_result.adapter_displacement,
                         }
                     )
@@ -348,6 +349,14 @@ def run(
 @click.option(
     "--pafa_gaussian_noise_std", type=float, default=0.015, show_default=True
 )
+@click.option(
+    "--pafa_pseudo_anomaly_mode",
+    type=click.Choice(["gaussian", "directed"]),
+    default="gaussian",
+    show_default=True,
+)
+@click.option("--pafa_directed_step_size", type=float, default=0.015, show_default=True)
+@click.option("--pafa_directed_jitter_std", type=float, default=0.001, show_default=True)
 @click.option("--pafa_pseudo_margin", type=float, default=0.5, show_default=True)
 @click.option(
     "--pafa_nominal_preservation_weight", type=float, default=1.0, show_default=True
@@ -378,6 +387,9 @@ def patch_core(
     pafa_epochs,
     pafa_learning_rate,
     pafa_gaussian_noise_std,
+    pafa_pseudo_anomaly_mode,
+    pafa_directed_step_size,
+    pafa_directed_jitter_std,
     pafa_pseudo_margin,
     pafa_nominal_preservation_weight,
     pafa_discriminator_hidden_dimension,
@@ -438,6 +450,9 @@ def patch_core(
                             epochs=pafa_epochs,
                             learning_rate=pafa_learning_rate,
                             gaussian_noise_std=pafa_gaussian_noise_std,
+                            pseudo_anomaly_mode=pafa_pseudo_anomaly_mode,
+                            directed_step_size=pafa_directed_step_size,
+                            directed_jitter_std=pafa_directed_jitter_std,
                             pseudo_margin=pafa_pseudo_margin,
                             nominal_preservation_weight=(
                                 pafa_nominal_preservation_weight

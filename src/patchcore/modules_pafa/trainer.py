@@ -1,5 +1,6 @@
 """Training loop for PAFA v1 Gaussian adapter experiments."""
 
+from dataclasses import asdict
 from dataclasses import dataclass
 from typing import Dict
 from typing import List
@@ -8,6 +9,7 @@ from typing import Optional
 import torch
 
 from patchcore.modules_pafa.discriminator import FeatureDiscriminator
+from patchcore.modules_pafa.pseudo_anomaly import DirectedPseudoAnomalyGenerator
 from patchcore.modules_pafa.pseudo_anomaly import GaussianPseudoAnomalyGenerator
 
 
@@ -16,6 +18,9 @@ class PAFATrainingConfig:
     epochs: int = 1
     learning_rate: float = 0.0001
     gaussian_noise_std: float = 0.015
+    pseudo_anomaly_mode: str = "gaussian"
+    directed_step_size: float = 0.015
+    directed_jitter_std: float = 0.001
     pseudo_margin: float = 0.5
     nominal_preservation_weight: float = 1.0
     discriminator_hidden_dimension: int = 256
@@ -27,6 +32,7 @@ class PAFATrainingResult:
     losses: List[float]
     loss_components: List[Dict[str, float]]
     adapter_displacement: float
+    training_config: Dict[str, object]
 
 
 class PAFAAdapterTrainer:
@@ -39,6 +45,12 @@ class PAFAAdapterTrainer:
             raise ValueError("PAFA learning_rate must be positive.")
         if config.gaussian_noise_std <= 0:
             raise ValueError("PAFA gaussian_noise_std must be positive.")
+        if config.pseudo_anomaly_mode not in {"gaussian", "directed"}:
+            raise ValueError("PAFA pseudo_anomaly_mode must be gaussian or directed.")
+        if config.directed_step_size <= 0:
+            raise ValueError("PAFA directed_step_size must be positive.")
+        if config.directed_jitter_std < 0:
+            raise ValueError("PAFA directed_jitter_std must be non-negative.")
         if config.pseudo_margin <= 0:
             raise ValueError("PAFA pseudo_margin must be positive.")
         if config.nominal_preservation_weight < 0:
@@ -60,7 +72,7 @@ class PAFAAdapterTrainer:
                 patchcore_model.target_embed_dimension,
                 self.config.discriminator_hidden_dimension,
             ).to(patchcore_model.device)
-        generator = GaussianPseudoAnomalyGenerator(self.config.gaussian_noise_std)
+        generator = self._create_pseudo_anomaly_generator()
         parameters = list(adapter.parameters())
         if discriminator is not None:
             parameters += list(discriminator.parameters())
@@ -159,6 +171,15 @@ class PAFAAdapterTrainer:
             losses=losses,
             loss_components=loss_components,
             adapter_displacement=adapter_displacement,
+            training_config=asdict(self.config),
+        )
+
+    def _create_pseudo_anomaly_generator(self):
+        if self.config.pseudo_anomaly_mode == "gaussian":
+            return GaussianPseudoAnomalyGenerator(self.config.gaussian_noise_std)
+        return DirectedPseudoAnomalyGenerator(
+            step_size=self.config.directed_step_size,
+            jitter_std=self.config.directed_jitter_std,
         )
 
     @staticmethod
