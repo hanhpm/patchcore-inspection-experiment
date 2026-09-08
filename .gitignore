@@ -13,3 +13,8 @@ uv_guide.md
 results/*
 
 experiments/
+
+configs/
+test/
+experiments_scripts/
+src/
