@@ -27,6 +27,8 @@ from config.config import AppConfig, ConfigLoader
 from patchcore.datasets.factory import create_dataset
 from patchcore.datasets.mvtec import DatasetSplit, MVTecDataset
 from patchcore.device import DeviceManager
+from patchcore.modules_cfa.trainer import CFAAdapterTrainer
+from patchcore.modules_cfa.trainer import CFATrainingConfig
 
 
 class PatchCoreFactory:
@@ -41,7 +43,10 @@ class PatchCoreFactory:
         )
         model = patchcore.patchcore.PatchCore(device)
         feature_adapter = (
-            create_feature_adapter(config.adapter.type)
+            create_feature_adapter(
+                config.adapter.type,
+                embedding_dimension=config.patchcore.target_embedding_dimension,
+            )
             if config.adapter.enabled
             else None
         )
@@ -62,6 +67,20 @@ class PatchCoreFactory:
                 config.adapter.type if config.adapter.enabled else "none"
             ),
         )
+        if config.adapter.enabled and config.adapter.type == "cfa":
+            model.set_feature_adapter_trainer(
+                CFAAdapterTrainer(
+                    CFATrainingConfig(
+                        epochs=config.adapter.epochs,
+                        learning_rate=config.adapter.learning_rate,
+                        weight_decay=config.adapter.weight_decay,
+                        nu=config.adapter.nu,
+                        alpha=config.adapter.alpha,
+                        k_neighbors=config.adapter.k_neighbors,
+                        j_neighbors=config.adapter.j_neighbors,
+                    )
+                )
+            )
         return model
 
 
@@ -114,6 +133,16 @@ class ExperimentRunner:
         )
         model = PatchCoreFactory().create(config, device)
         started = time.perf_counter()
+        adapter_training_result = None
+        if config.adapter.enabled and config.adapter.type == "cfa":
+            event_log.append("event=feature_adapter_training_started adapter=cfa")
+            adapter_training_result = model.train_feature_adapter(train_loader)
+            event_log.append(
+                "event=feature_adapter_training_completed steps={} adapter_displacement={}".format(
+                    len(adapter_training_result.losses),
+                    adapter_training_result.adapter_displacement,
+                )
+            )
         event_log.append("event=memory_bank_fit_started")
         model.fit(train_loader)
         fit_seconds = time.perf_counter() - started
@@ -125,7 +154,9 @@ class ExperimentRunner:
         )
         inference_started = time.perf_counter()
         event_log.append("event=inference_started")
-        scores, anomaly_maps, labels, masks = model.predict(test_loader)
+        scores, anomaly_maps, labels, masks, prediction_details = model.predict(
+            test_loader, return_details=True
+        )
         inference_seconds = time.perf_counter() - inference_started
         event_log.append(
             "event=inference_completed seconds={}".format(inference_seconds)
@@ -189,6 +220,25 @@ class ExperimentRunner:
                 "kind": config.test_shift.kind,
                 "factor": config.test_shift.factor,
             },
+            "adapter": {
+                "enabled": config.adapter.enabled,
+                "type": config.adapter.type,
+                "training": (
+                    adapter_training_result.training_config
+                    if adapter_training_result
+                    else None
+                ),
+                "training_steps": (
+                    len(adapter_training_result.losses)
+                    if adapter_training_result
+                    else 0
+                ),
+                "adapter_displacement": (
+                    adapter_training_result.adapter_displacement
+                    if adapter_training_result
+                    else None
+                ),
+            },
         }
         if not np.isfinite([metrics["i_auroc"], metrics["p_auroc"]]).all():
             raise AssertionError("Scientific baseline produced NaN or Inf metrics.")
@@ -200,7 +250,22 @@ class ExperimentRunner:
             labels=np.asarray(labels),
             masks=np.asarray(masks),
             image_paths=np.asarray([item[2] for item in test_dataset.data_to_iterate]),
+            patch_distances=np.asarray(prediction_details["patch_distances"]),
+            patch_indices=np.asarray(prediction_details["patch_indices"]),
+            patch_embeddings=np.asarray(prediction_details["patch_embeddings"]),
         )
+        if adapter_training_result is not None:
+            self._write_json(
+                run_directory / "adapter_training.json",
+                {
+                    "losses": adapter_training_result.losses,
+                    "loss_components": adapter_training_result.loss_components,
+                    "adapter_displacement": adapter_training_result.adapter_displacement,
+                    "training_config": adapter_training_result.training_config,
+                },
+            )
+            (run_directory / "model").mkdir(parents=True, exist_ok=False)
+            model.save_to_path(str(run_directory / "model"))
         self._save_anomaly_maps(run_directory / "anomaly_maps", anomaly_maps)
         event_log.extend(
             [

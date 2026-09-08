@@ -66,6 +66,13 @@ class TestShiftConfig:
 class AdapterConfig:
     enabled: bool = False
     type: str = "identity"
+    epochs: int = 30
+    learning_rate: float = 0.001
+    weight_decay: float = 0.0005
+    nu: float = 0.001
+    alpha: float = 0.1
+    k_neighbors: int = 3
+    j_neighbors: int = 3
 
 
 @dataclass(frozen=True)
@@ -163,5 +170,17 @@ class ConfigLoader:
             raise ValueError("Test shift factor must be positive.")
         if test_shift.enabled and test_shift.kind == "none":
             raise ValueError("Enabled test shift requires a non-none kind.")
-        if adapter.type not in {"identity"}:
+        if adapter.type not in {"identity", "cfa"}:
             raise ValueError("Unsupported adapter type: {}.".format(adapter.type))
+        if adapter.epochs <= 0:
+            raise ValueError("Adapter epochs must be positive.")
+        if adapter.learning_rate <= 0:
+            raise ValueError("Adapter learning_rate must be positive.")
+        if adapter.weight_decay < 0:
+            raise ValueError("Adapter weight_decay must be non-negative.")
+        if adapter.nu <= 0:
+            raise ValueError("Adapter nu must be positive.")
+        if adapter.alpha < 0:
+            raise ValueError("Adapter alpha must be non-negative.")
+        if adapter.k_neighbors <= 0 or adapter.j_neighbors <= 0:
+            raise ValueError("Adapter neighbor counts must be positive.")

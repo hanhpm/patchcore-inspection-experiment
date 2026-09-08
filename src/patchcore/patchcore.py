@@ -203,12 +203,12 @@ class PatchCore(torch.nn.Module):
 
         self.anomaly_scorer.fit(detection_features=[features])
 
-    def predict(self, data):
+    def predict(self, data, return_details=False):
         if isinstance(data, torch.utils.data.DataLoader):
-            return self._predict_dataloader(data)
-        return self._predict(data)
+            return self._predict_dataloader(data, return_details=return_details)
+        return self._predict(data, return_details=return_details)
 
-    def _predict_dataloader(self, dataloader):
+    def _predict_dataloader(self, dataloader, return_details=False):
         """This function provides anomaly scores/maps for full dataloaders."""
         _ = self.forward_modules.eval()
 
@@ -216,19 +216,32 @@ class PatchCore(torch.nn.Module):
         masks = []
         labels_gt = []
         masks_gt = []
+        details = {
+            "patch_distances": [],
+            "patch_indices": [],
+            "patch_embeddings": [],
+        }
         with tqdm.tqdm(dataloader, desc="Inferring...", leave=False) as data_iterator:
             for image in data_iterator:
                 if isinstance(image, dict):
                     labels_gt.extend(image["is_anomaly"].numpy().tolist())
                     masks_gt.extend(image["mask"].numpy().tolist())
                     image = image["image"]
-                _scores, _masks = self._predict(image)
+                prediction = self._predict(image, return_details=return_details)
+                if return_details:
+                    _scores, _masks, _details = prediction
+                    for key in details:
+                        details[key].extend(_details[key])
+                else:
+                    _scores, _masks = prediction
                 for score, mask in zip(_scores, _masks):
                     scores.append(score)
                     masks.append(mask)
+        if return_details:
+            return scores, masks, labels_gt, masks_gt, details
         return scores, masks, labels_gt, masks_gt
 
-    def _predict(self, images):
+    def _predict(self, images, return_details=False):
         """Infer score and mask for a batch of images."""
         images = images.to(torch.float).to(self.device)
         _ = self.forward_modules.eval()
@@ -238,7 +251,10 @@ class PatchCore(torch.nn.Module):
             features, patch_shapes = self._embed(images, provide_patch_shapes=True)
             features = np.asarray(features)
 
-            patch_scores = image_scores = self.anomaly_scorer.predict([features])[0]
+            patch_scores, patch_distances, patch_indices = self.anomaly_scorer.predict(
+                [features]
+            )
+            image_scores = patch_scores
             image_scores = self.patch_maker.unpatch_scores(
                 image_scores, batchsize=batchsize
             )
@@ -253,6 +269,21 @@ class PatchCore(torch.nn.Module):
 
             masks = self.anomaly_segmentor.convert_to_segmentation(patch_scores)
 
+        if return_details:
+            scales = patch_shapes[0]
+            patch_distances = self.patch_maker.unpatch_scores(
+                patch_distances, batchsize=batchsize
+            ).reshape(batchsize, scales[0], scales[1], -1)
+            patch_indices = self.patch_maker.unpatch_scores(
+                patch_indices, batchsize=batchsize
+            ).reshape(batchsize, scales[0], scales[1], -1)
+            patch_embeddings = features.reshape(batchsize, scales[0], scales[1], -1)
+            details = {
+                "patch_distances": [item for item in patch_distances],
+                "patch_indices": [item for item in patch_indices],
+                "patch_embeddings": [item for item in patch_embeddings],
+            }
+            return [score for score in image_scores], [mask for mask in masks], details
         return [score for score in image_scores], [mask for mask in masks]
 
     @staticmethod
@@ -314,7 +345,7 @@ class PatchCore(torch.nn.Module):
         patchcore_params["backbone"].name = patchcore_params["backbone.name"]
         del patchcore_params["backbone.name"]
         feature_adapter_type = patchcore_params.get("feature_adapter_type", "none")
-        if feature_adapter_type in {"identity", "pafa_residual"}:
+        if feature_adapter_type in {"identity", "pafa_residual", "cfa"}:
             patchcore_params["feature_adapter"] = (
                 patchcore.adapter.create_feature_adapter(
                     feature_adapter_type,

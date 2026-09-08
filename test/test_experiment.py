@@ -32,6 +32,18 @@ def test_factory_adds_identity_adapter_when_enabled():
     assert "feature_adapter" in model.forward_modules
 
 
+def test_factory_adds_cfa_trainer_when_enabled():
+    root = Path(__file__).resolve().parents[1]
+    config = ConfigLoader().load(root / "configs/patchcore_cpu_smoke.yaml")
+    config = replace(config, adapter=AdapterConfig(enabled=True, type="cfa", epochs=1))
+
+    model = PatchCoreFactory().create(config, torch.device("cpu"))
+
+    assert model.feature_adapter_type == "cfa"
+    assert "feature_adapter" in model.forward_modules
+    assert model.feature_adapter_trainer is not None
+
+
 def test_run_directory_contains_experiment_and_class(tmp_path):
     root = Path(__file__).resolve().parents[1]
     config = ConfigLoader().load(root / "configs/patchcore_cpu_smoke.yaml")

@@ -59,3 +59,17 @@ def test_controlled_brightness_configs_change_only_train_method_and_test_shift()
     assert vanilla.test_shift.factor == 0.8
     assert vanilla.augmentation.enabled is False
     assert augmented.augmentation.enabled is True
+
+
+def test_cfa_mvtec_ad2_config_loads():
+    repository_root = Path(__file__).resolve().parents[1]
+    config = ConfigLoader().load(
+        repository_root / "configs/mvtec2_experiments/r1_adapted_mvtec_ad2_rice.yaml"
+    )
+
+    assert config.experiment.name == "R1_adapted"
+    assert config.dataset.name == "mvtec_ad_2"
+    assert config.dataset.class_name == "rice"
+    assert config.adapter.enabled is True
+    assert config.adapter.type == "cfa"
+    assert config.adapter.epochs == 30

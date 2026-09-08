@@ -2,6 +2,8 @@ import torch
 from torchvision import models
 
 from patchcore.adapter import create_feature_adapter
+from patchcore.modules_cfa.trainer import CFAAdapterTrainer
+from patchcore.modules_cfa.trainer import CFATrainingConfig
 from patchcore.modules_pafa.pseudo_anomaly import GaussianPseudoAnomalyGenerator
 from patchcore.modules_pafa.trainer import PAFAAdapterTrainer
 from patchcore.modules_pafa.trainer import PAFATrainingConfig
@@ -29,6 +31,15 @@ def test_pafa_residual_adapter_starts_as_identity():
     adapted = adapter(features)
 
     assert torch.equal(adapted, features)
+
+
+def test_cfa_adapter_starts_as_identity():
+    features = torch.randn(8, 256)
+    adapter = create_feature_adapter("cfa", embedding_dimension=256)
+
+    adapted = adapter(features)
+
+    assert torch.allclose(adapted, features)
 
 
 def test_gaussian_pseudo_anomaly_preserves_shape():
@@ -83,6 +94,44 @@ def test_pafa_trainer_runs_on_patchcore_embeddings():
     assert "pseudo_margin_loss" in result.loss_components[0]
     assert "nominal_preservation_loss" in result.loss_components[0]
     assert result.loss_components[0]["discriminator_loss"] == 0
+    assert result.adapter_displacement >= 0
+
+
+def test_cfa_trainer_runs_on_patchcore_embeddings():
+    torch.manual_seed(0)
+    image_dimension = 32
+    model = PatchCore(torch.device("cpu"))
+    backbone = models.wide_resnet50_2(pretrained=False)
+    backbone.name, backbone.seed = "wideresnet50", 0
+    model.load(
+        backbone=backbone,
+        layers_to_extract_from=["layer2", "layer3"],
+        device=torch.device("cpu"),
+        input_shape=[3, image_dimension, image_dimension],
+        pretrain_embed_dimension=64,
+        target_embed_dimension=64,
+        patchsize=3,
+        feature_adapter=create_feature_adapter("cfa", embedding_dimension=64),
+        feature_adapter_type="cfa",
+    )
+    model.set_feature_adapter_trainer(
+        CFAAdapterTrainer(
+            CFATrainingConfig(
+                epochs=1,
+                learning_rate=0.001,
+                k_neighbors=1,
+                j_neighbors=1,
+            )
+        )
+    )
+    images = torch.rand([2, 3, image_dimension, image_dimension])
+    dataloader = torch.utils.data.DataLoader(images, batch_size=1)
+
+    result = model.train_feature_adapter(dataloader)
+
+    assert len(result.losses) == 2
+    assert "attraction_loss" in result.loss_components[0]
+    assert "repulsion_loss" in result.loss_components[0]
     assert result.adapter_displacement >= 0
 
 

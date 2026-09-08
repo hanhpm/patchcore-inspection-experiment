@@ -2,6 +2,7 @@
 
 import torch
 
+from patchcore.modules_cfa.adapter import CFAFeatureAdapter
 from patchcore.modules_pafa.residual_adapter import ResidualFeatureAdapter
 
 
@@ -20,6 +21,10 @@ def create_feature_adapter(
 ) -> torch.nn.Module:
     if adapter_type == "identity":
         return IdentityFeatureAdapter()
+    if adapter_type == "cfa":
+        if embedding_dimension is None:
+            raise ValueError("CFA adapter requires embedding_dimension.")
+        return CFAFeatureAdapter(embedding_dimension)
     if adapter_type == "pafa_residual":
         if embedding_dimension is None:
             raise ValueError("PAFA residual adapter requires embedding_dimension.")
