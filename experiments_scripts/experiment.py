@@ -38,6 +38,7 @@ class PatchCoreFactory:
         self, config: AppConfig, device: torch.device
     ) -> patchcore.patchcore.PatchCore:
         backbone = patchcore.backbones.load(config.patchcore.backbone)
+        backbone.name = config.patchcore.backbone
         sampler = patchcore.sampler.ApproximateGreedyCoresetSampler(
             percentage=config.patchcore.coreset_ratio, device=device
         )
